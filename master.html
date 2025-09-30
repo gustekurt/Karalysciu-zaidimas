@@ -1,0 +1,84 @@
+<!-- master.html -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Master — Kingdom</title>
+<style>body{font-family:system-ui;padding:12px} .card{background:#fff;padding:10px;border-radius:8px;margin-bottom:10px;box-shadow:0 4px 12px rgba(0,0,0,0.06)}</style>
+</head>
+<body>
+  <h2>Master Dashboard</h2>
+  <div class="card">
+    <label>Master key: <input id="mk" placeholder="master key"></label>
+    <button id="btnLoad">Load players</button>
+    <button id="btnResolve">Resolve current round</button>
+  </div>
+
+  <div id="players" class="card"></div>
+  <div id="moves" class="card"></div>
+  <div class="card">
+    <h4>Events</h4>
+    <div id="eventsBox"></div>
+    <input id="eventText" placeholder="Sukurti viešą pranešimą">
+    <button id="btnAddEv">Add Event</button>
+  </div>
+
+<script>
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzVbRS4r6ameUZShK_C3-uwB7j7107Gc_YAatWA91wWn6OD_Hf6RNzfVHd00o1RwjtD/exec";
+document.getElementById('btnLoad').onclick = loadAll;
+document.getElementById('btnResolve').onclick = resolveRound;
+document.getElementById('btnAddEv').onclick = addEvent;
+
+async function loadAll(){
+  const res = await fetch(SCRIPT_URL + "?action=getPlayers");
+  const j = await res.json();
+  renderPlayers(j.players || []);
+  const pub = await fetch(SCRIPT_URL + "?action=getPublic");
+  const p = await pub.json();
+  renderEvents(p.events || []);
+}
+
+function renderPlayers(players){
+  const el = document.getElementById('players');
+  el.innerHTML = "<h4>Players</h4>" + players.map(p=>`<div><strong>${p.nickname}</strong> (${p.id}) — ${p.noble} — Gold:${p.gold} Soldiers:${p.soldiers} Inf:${p.influence} Status:${p.status} Perk:${p.perk}</div>`).join("");
+  // load moves too
+  const mEl = document.getElementById('moves');
+  // minimal: show latest moves (caller can check Moves sheet in Sheet)
+  mEl.innerHTML = "<em>Moves are in Google Sheet -> Moves tab (open sheet to inspect)</em>";
+}
+
+function renderEvents(events){
+  const el = document.getElementById('eventsBox');
+  el.innerHTML = events.map(e=>`[R${e.round}] ${e.text}`).join("<br>");
+}
+
+async function resolveRound(){
+  const mk = document.getElementById('mk').value.trim();
+  if(!mk) return alert("Įvesk masterKey");
+  document.getElementById('btnResolve').disabled = true;
+  const res = await fetch(SCRIPT_URL, {
+    method:'POST',
+    body: JSON.stringify({ action: 'resolve', masterKey: mk }),
+    headers: { "Content-Type":"application/json" }
+  });
+  const j = await res.json();
+  alert("Resolve result: " + (j.ok ? "OK" : JSON.stringify(j)));
+  document.getElementById('btnResolve').disabled = false;
+  loadAll();
+}
+
+async function addEvent(){
+  const mk = document.getElementById('mk').value.trim();
+  const txt = document.getElementById('eventText').value.trim();
+  if(!mk || !txt) return alert("MasterKey ir tekstas");
+  const res = await fetch(SCRIPT_URL, {
+    method:'POST',
+    body: JSON.stringify({ action:'addEvent', masterKey: mk, text: txt}),
+    headers: { "Content-Type":"application/json" }
+  });
+  const j = await res.json();
+  alert(JSON.stringify(j));
+  loadAll();
+}
+</script>
+</body>
+</html>
