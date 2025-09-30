@@ -1,0 +1,186 @@
+<!-- player.html -->
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kingdom Politics — Player</title>
+<style>
+  body{font-family:system-ui, sans-serif; padding:12px; background:#f8f7f5;}
+  .card{background:white;padding:12px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,0.06); margin-bottom:12px;}
+  .stats{display:flex;gap:8px;justify-content:space-between}
+  button{padding:10px;border-radius:8px;border:0;background:#2A3A49;color:white}
+  .small{font-size:0.9rem;color:#555}
+</style>
+</head>
+<body>
+  <div id="app" class="card">
+    <h2>Kingdom Politics — Player</h2>
+    <div id="login" class="card">
+      <label>Slapyvardis: <input id="nick" placeholder="Tavo slapyvardis"></label>
+      <button id="btnReg">Prisijungti / Gauti statusą</button>
+      <p class="small">Įvesk savo slapyvardį ir nuspausk „Prisijungti“. Tada gausi savo personažą.</p>
+    </div>
+
+    <div id="playArea" style="display:none">
+      <div class="card">
+        <div id="nobleBox"></div>
+        <div class="stats">
+          <div>💰 <span id="gold">-</span></div>
+          <div>🛡️ <span id="soldiers">-</span></div>
+          <div>👑 <span id="influence">-</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Pasirink ėjimą (vienas per raundą)</h4>
+        <div id="actions">
+          <button data-act="Tax">Tax (gauti aukso, -1 influence)</button>
+          <button data-act="Raid">Raid (užpulti)</button>
+          <button data-act="Recruit">Recruit (1 gold -> +2 soldiers)</button>
+          <button data-act="Spy">Spy (patikrinti)</button>
+          <button data-act="Build">Build (1 gold -> +1 influence)</button>
+        </div>
+        <div id="targetRow" style="margin-top:8px; display:none;">
+          <label>Target:
+            <select id="targetSelect"></select>
+          </label>
+        </div>
+        <div style="margin-top:8px"><button id="btnSend">Siųsti ėjimą</button> <span id="status" class="small"></span></div>
+      </div>
+
+      <div class="card">
+        <h4>Spy rezultatai (matomi po sekančio raundo starto)</h4>
+        <div id="spyBox" class="small"></div>
+      </div>
+
+      <div class="card">
+        <h4>Public info & events</h4>
+        <div id="events" class="small"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzVbRS4r6ameUZShK_C3-uwB7j7107Gc_YAatWA91wWn6OD_Hf6RNzfVHd00o1RwjtD/exec"; // <-- pakeisk
+const GAME_KEY = "Gustėyralabaigraži"; // <-- pakeisk
+
+let player = null;
+let lastKnownRound = 0;
+
+document.getElementById('btnReg').onclick = async ()=>{
+  const nick = document.getElementById('nick').value.trim();
+  if(!nick) return alert("Įvesk slapyvardį");
+  const res = await fetch(SCRIPT_URL, {
+    method: "POST",
+    body: JSON.stringify({ action: "register", nickname: nick, gameKey: GAME_KEY }),
+    headers: { "Content-Type":"application/json" }
+  });
+  const j = await res.json();
+  if(j.error) return alert("Klaida: " + j.error);
+  player = j.player;
+  // show nobleName if server returned it
+  if(j.nobleName) alert("Tau buvo priskirta: " + j.nobleName);
+  showPlayArea();
+  startPolling();
+};
+
+function showPlayArea(){
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('playArea').style.display = 'block';
+  renderPlayer();
+  // action buttons
+  document.querySelectorAll('#actions button').forEach(b=>{
+    b.onclick = ()=>{
+      const act = b.dataset.act;
+      if(act === "Raid" || act === "Spy") {
+        document.getElementById('targetRow').style.display = 'block';
+        populateTargets();
+      } else {
+        document.getElementById('targetRow').style.display = 'none';
+      }
+      document.getElementById('status').textContent = "Pasirinkta: " + act;
+      document.getElementById('status').dataset.chosen = act;
+    };
+  });
+
+  document.getElementById('btnSend').onclick = async ()=>{
+    const chosen = document.getElementById('status').dataset.chosen;
+    if(!chosen) return alert("Pasirink ėjimą");
+    const target = document.getElementById('targetSelect').value || "";
+    document.getElementById('btnSend').disabled = true;
+    document.getElementById('status').textContent = "Siunčiu ėjimą...";
+    const res = await fetch(SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "move", playerId: player.id, actionType: chosen, targetId: target, gameKey: GAME_KEY }),
+      headers: { "Content-Type":"application/json" }
+    });
+    const j = await res.json();
+    if(j.ok){
+      document.getElementById('status').textContent = "Eikimas užregistruotas. Laukiam raundo pabaigos.";
+    } else {
+      document.getElementById('status').textContent = "Klaida: " + (j.error||"unknown");
+      document.getElementById('btnSend').disabled = false;
+    }
+  };
+}
+
+async function populateTargets(){
+  // get public players
+  const res = await fetch(SCRIPT_URL + "?action=getPlayers");
+  const j = await res.json();
+  const sel = document.getElementById('targetSelect');
+  sel.innerHTML = "<option value=''>--pasirink--</option>";
+  j.players.forEach(p=>{
+    if(p.id !== player.id && p.status === "active"){
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.nickname;
+      sel.appendChild(opt);
+    }
+  });
+}
+
+async function startPolling(){
+  setInterval(async ()=>{
+    if(!player) return;
+    const res = await fetch(SCRIPT_URL + "?action=getPlayer&playerId=" + encodeURIComponent(player.id));
+    const j = await res.json();
+    if(j.error) return console.log("poll err", j);
+    // update local player info if changed
+    player = j.player;
+    renderPlayer();
+    // show events & spy results
+    renderEvents(j.events || []);
+    renderSpy(j.spyResults || []);
+    // enable action if round advanced
+    if(j.currentRound > lastKnownRound){
+      lastKnownRound = j.currentRound;
+      document.getElementById('btnSend').disabled = false;
+      document.getElementById('status').textContent = "";
+    }
+  }, 2500);
+}
+
+function renderPlayer(){
+  document.getElementById('nobleBox').innerHTML = `<strong>${player.nickname}</strong> — ${player.noble}`;
+  document.getElementById('gold').textContent = player.gold;
+  document.getElementById('soldiers').textContent = player.soldiers;
+  document.getElementById('influence').textContent = player.influence;
+}
+
+function renderEvents(events){
+  const el = document.getElementById('events');
+  el.innerHTML = events.slice(-6).map(e=>`<div>[R${e.round}] ${e.text}</div>`).join("");
+}
+
+function renderSpy(spyRows){
+  const el = document.getElementById('spyBox');
+  if(!spyRows.length) el.innerHTML = "Nėra naujų spy rezultatų.";
+  else {
+    el.innerHTML = spyRows.map(r=>`[R${r.round}] Target: ${r.targetPlayerId} — Gold:${r.gold} Soldiers:${r.soldiers} Inf:${r.influence}`).join("<br>");
+  }
+}
+</script>
+</body>
+</html>
